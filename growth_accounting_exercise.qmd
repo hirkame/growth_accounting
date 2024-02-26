@@ -1,0 +1,172 @@
+# Growth Accounting Exercise
+
+```{r include=FALSE}
+library(tidyverse)
+```
+
+## (a)
+
+Identify a time period and a country of your interest for which you can get data. We are going to focus on data from the EUKLEMS database <https://www.rug.nl/ggdc/overview-databases/?lang=en>. Note that this website also contains interesting data besides EUKLEMS.
+
+::: {.callout-note appearance="minimal"}
+Growth Accounts, National Accounts? "Total - all NACE activities" or "Total industries (A-S)"?
+:::
+
+```{r import data}
+# National accounts
+national_accounts <- readRDS(file = "data/national accounts.rds")
+
+clean_national_accounts <- national_accounts |> 
+  filter(geo_name == "Japan")  |> 
+  filter(nace_r2_code == "TOT") |>
+  select(-c(geo_name, geo_code, nace_r2_name, nace_r2_code)) |> 
+  arrange(year)
+
+# Capital accounts
+capital_accounts <- readRDS(file = "data/capital accounts.rds")
+
+clean_capital_accounts <- capital_accounts |>
+  filter(geo_name == "Japan")  |>
+  filter(nace_r2_code == "TOT") |>
+  select(-c(geo_name, geo_code, nace_r2_name, nace_r2_code)) |>
+  arrange(year) 
+
+# Labor accounts
+labor_accounts <- readRDS(file = "data/labour accounts.rds")
+
+clean_labor_accounts <- labor_accounts |>
+  filter(geo_code == "JP")  |>
+  filter(nace_r2_code == "TOT") |>
+  select(-c(geo_code, nace_r2_code)) |>
+  arrange(year) 
+
+clean_labor_accounts <- clean_labor_accounts |> 
+  pivot_wider(
+    names_from =  c("education", "age", "gender"),
+    values_from = c("Share_E", "Share_W"),
+    names_glue = "{.value}_{education}_{age}_{gender}"
+  )
+
+# Growth accounts
+growth_accounts <- readRDS(file = "data/growth accounts.rds")
+
+clean_growth_accounts <- growth_accounts |>
+  filter(geo_name == "Japan")  |>
+  filter(nace_r2_code == "TOT") |>
+  filter(year != 2021) |> 
+  select(-c(geo_name, geo_code, nace_r2_name, nace_r2_code)) |>
+  arrange(year) |>
+  pivot_wider(
+    names_from = "var",
+    values_from = "value"
+  )
+```
+
+```{r combine data}
+convert_year_to_double <- function(df) {
+  df$year <- as.double(df$year)
+  return(df)
+}
+
+narrow_time_periods <- function(df) {
+  df <- df |>
+    filter(year %in% min(clean_labor_accounts$year):max(clean_labor_accounts$year)) |> 
+    select(-year)
+  
+  return(df)
+}
+
+# List of data frames
+clean_datasets <- list(clean_national_accounts, clean_capital_accounts, 
+                    clean_labor_accounts, clean_growth_accounts)
+
+# Apply the function to each data frame using map()
+data_frames <- map(clean_datasets, ~ convert_year_to_double(.)) |> 
+  map(~ narrow_time_periods(.))
+
+clean_data <- bind_cols(data_frames) |> 
+  mutate(year = min(clean_labor_accounts$year):max(clean_labor_accounts$year), .before = everything())
+```
+
+```{r Print year}
+unique(clean_data$year)
+```
+
+## (b)
+
+Describe the evolution of aggregate output per worker. Discuss major policies in place (or policy changes), institutional features, etc. that characterize the country and time period of your choosing. Does it matter whether you focus on the total of the economy or the market economy?
+
+::: {.callout-note appearance="minimal"}
+"GO_CP", "GO_PYP" or "GO_Q"?
+:::
+
+::: {.callout-note appearance="minimal"}
+"EMP" or "EMPE"?
+:::
+
+```{r Output per capita growth}
+output_per_capita <- clean_data |> 
+  mutate(
+    EMP = GO_CP / EMP,
+    EMPE = GO_CP / EMPE
+  ) |>  
+  select(year, EMP, EMPE) |> 
+  pivot_longer(
+    cols = !year, 
+    names_to = "cat",
+    values_to = "value"
+  )
+
+ggplot(output_per_capita, aes(x = year, y = value, color = cat)) + 
+  geom_point() + 
+  geom_line() 
+```
+
+## (c)
+
+Decompose the growth in income per capita between, capital, human capital, and TFP using the formula coming from the time derivative of the equation from class y = (K/Y )α/(1−α) hA. Assume α = 1/3. Discuss different measures of capital and human capital that you have available in the data and whether they make a difference for your growth accounting exercise.
+
+::: {.callout-note appearance="minimal"}
+I_GFCF or K_GFCF?
+:::
+
+::: {.callout-note appearance="minimal"}
+Gender, age... How to define education? 
+:::
+
+```{r Visualize labor share}
+labor_share <- labor_accounts |>
+  filter(geo_code == "JP")  |>
+  filter(nace_r2_code == "TOT") |>
+  select(-c(geo_code, nace_r2_code)) |>
+  arrange(year) |> 
+  summarize(
+    share_e = sum(Share_E), 
+    share_w = sum(Share_W), 
+    .by = c("year",  "education")
+  ) |> 
+  pivot_longer(
+    cols = c("share_e", "share_w"),
+    values_to = "share", 
+    names_to = "cat"
+  )
+
+ggplot(labor_share, aes(x = year, y = share, colour = education)) + 
+  geom_point() + 
+  geom_line() + 
+  facet_wrap(. ~ cat)
+```
+
+```{r Decompose growth}
+decompose_growth <- clean_data |> 
+  select(
+    # Y
+    GO_CP, 
+    # L
+    EMP, 
+    # K
+    I_GFCF, K_GFCF
+    # h 
+    
+  ) 
+```
